@@ -42,9 +42,12 @@ def calculate_rsi(close: pd.Series, window=14):
 
     return rsi
 
-def calculate_adx(df, window=45):
-
+def calculate_adx(df, window=45): #Propritory method
     df = df.copy()
+    if df[['high', 'low', 'close']].isnull().any().any():
+        return pd.DataFrame()  # Skip broken data
+
+    # Step 2: skip small groups
     df['up_move'] = df['high'].diff()
     df['down_move'] = -df['low'].diff()
 
@@ -74,7 +77,8 @@ def calculate_adx(df, window=45):
 
     return df[['date','symbol', '+DI', '-DI', 'ADX']]
 
-def calculate_adx_ta(df, window=14):
+
+def calculate_adx_ta(df, window=14): # Using ADXIndicator from ta library
     df = df.copy()
     df = df.sort_values('date')
     if df[['high', 'low', 'close']].isnull().any().any():
@@ -93,10 +97,8 @@ def calculate_adx_ta(df, window=14):
         df['symbol'] = df['symbol'].iloc[0]
         return df[['date', 'symbol', '+DI', '-DI', 'ADX']]
     except Exception as e:
-        print(f"Failed for symbol: {df['symbol'].iloc[0]} | Reason: {e}")
+        print(f"Failed for a symbol:| Reason: {e}")
         return pd.DataFrame()
-
-
 
 #setting date time format
 df['date'] = pd.to_datetime(df['date'])
@@ -129,11 +131,12 @@ df['45D_Z_SCORE'] = df.groupby('symbol')['close'].transform(
     lambda x: (x - x.ewm(span=45, adjust=False).mean()) / x.rolling(45).std()
 )
 
-#adx_df = df.groupby('symbol', group_keys=False).apply(lambda g: calculate_adx_ta(g, window=45)) #Using ADXIndicator from ta library
 
 # Group by symbol first, then apply the function on the dataframe excluding the symbol
-adx_result = df.groupby('symbol', group_keys=False).apply(lambda g: calculate_adx(g, window=45)) #Using proprietory function 
-df = df.merge(adx_result, on=['symbol', 'date'], how='left')
+# adx_ta = df.groupby('symbol', group_keys=False).apply(lambda g: calculate_adx_ta(g, window=45))
+# df = df.merge(adx_ta, on=['symbol', 'date'], how='left') #Using ADXIndicator from ta library
+adx_prop = df.groupby('symbol', group_keys=False).apply(lambda g: calculate_adx(g, window=45)) #Using proprietory function 
+df = df.merge(adx_prop, on=['symbol', 'date'], how='left')
 
 
 
