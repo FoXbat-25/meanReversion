@@ -23,7 +23,7 @@ query="""
 SELECT f.SYMBOL, f.DATE,f.HIGH, f.LOW,  f.CLOSE, f.VOLUME
 FROM NSEDATA_FACT f
 INNER JOIN METADATA2 m ON f.SYMBOL = m.SYMBOL 
-WHERE m.LISTING_DATE <= CURRENT_DATE - INTERVAL '30 days'
+WHERE m.LISTING_DATE <= CURRENT_DATE - INTERVAL '65 days'
 and DATE >= CURRENT_DATE - INTERVAL '240 days';
 """
 
@@ -139,51 +139,43 @@ adx_prop = df.groupby('symbol', group_keys=False).apply(lambda g: calculate_adx(
 df = df.merge(adx_prop, on=['symbol', 'date'], how='left')
 
 
-
 #Calculating DI difference for fading momentum
 # Compute di_diff per stock
-# df['di_diff'] = df['+DI'] - df['-DI']
+df['di_diff'] = df['+DI'] - df['-DI']
+df['di_diff_slope'] = df.groupby('symbol')['di_diff'].transform(lambda x: x.diff())
+df['rolling_quantile_threshold'] = df.groupby('symbol')['di_diff'].transform(
+    lambda x: x.rolling(window=45).quantile(0.25)
+)
 
-# # # Compute slope (first difference)
-# df['di_diff_slope'] = df.groupby('symbol')['di_diff'].transform(lambda x: x.diff())
+df['fading_momentum'] = (
+    (df['di_diff'] < df['rolling_quantile_threshold']) &
+    (df['di_diff_slope'] < 0) &
+    (df['+DI'] > df['-DI'])
+)
 
-# # # Rolling 25th percentile threshold of di_diff
-# df['rolling_quantile_threshold'] = df.groupby('symbol')['di_diff'].transform(
-#     lambda x: x.rolling(window=45).quantile(0.25)
-# )
+df['DI_45D_70perc_filter'] = df.groupby('symbol')['+DI'].transform(
+    lambda x: x.rolling(45).quantile(0.70)
+)
 
-# # # Fading momentum condition
-# df['fading_momentum'] = (
-#     (df['di_diff'] < df['rolling_quantile_threshold']) &
-#     (df['di_diff_slope'] < 0) &
-#     (df['+DI'] > df['-DI'])
-# )
-
-# # # 70th percentile filter for +DI
-# df['low_DI_filter'] = df.groupby('symbol')['+DI'].transform(
-#     lambda x: x.rolling(45).quantile(0.70)
-# )
-
-
-# df['Buy_Signal'] = df['45D_Z_SCORE'] < -1.85
-# df['Sell_Signal'] = df['45D_Z_SCORE'] > 1.85
-# df['Strong_Buy'] = (df['45D_Z_SCORE'] < -2 )& (df['RSI_7'] < 37) | (df['RSI_7'] < 22)
-# df['Strong_Sell'] = (
-#     df['fading_momentum'] &
-#     ((df['45D_Z_SCORE'] > 2) & (df['RSI_7'] > 67)) &
-#     df['low_DI_filter']
-# )
-
+df['Buy_Signal'] = df['45D_Z_SCORE'] < -1.85
+df['Sell_Signal'] = df['45D_Z_SCORE'] > 1.85
+df['Strong_Buy'] = (df['45D_Z_SCORE'] < -2 )& (df['RSI_7'] < 37) | (df['RSI_7'] < 22)
+df['Strong_Sell'] = (
+    df['fading_momentum'] &
+    ((df['45D_Z_SCORE'] > 2) & (df['RSI_7'] > 67)) &
+    ((df['+DI']) > (df['DI_45D_70perc_filter']))
+)
 
 #Resorting the data, for latest dates to be on top
 df = df.sort_values(by=['symbol', 'date'], ascending=[True, False])
 
-# Check the last few rows for 'close' column NaNs or issues
-#print(df.tail(30))
+# first_symbol = df['symbol'].iloc[0]
+# df_first_symbol = df[df['symbol'] == first_symbol]
+# print(df_first_symbol)
 
 df_first_row=df.groupby('symbol').head(1)
 print(df_first_row)
-df_second_row=df.groupby('symbol').nth(1).reset_index()
+#df_second_row=df.groupby('symbol').nth(1).reset_index()
 #print(df_second_row)
 
 
