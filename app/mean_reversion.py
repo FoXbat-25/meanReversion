@@ -8,7 +8,11 @@ import pandas as pd
 from sqlalchemy import create_engine
 import numpy as np
 
-from datetime import timedelta
+from datetime import datetime, timedelta
+
+#Bollinger Band - 2 Std, 20d SMA
+#ADX - 15d
+#Di_diff - 
 
 
 engine = create_engine(SQL_ALCHEMY_CONN)
@@ -22,17 +26,25 @@ sell_reco_ystd = set()
 strong_buy_reco_ystd = set()
 strong_sell_reco_ystd = set()
 
-query="""
-SELECT f.SYMBOL, f.DATE,f.OPEN, f.HIGH, f.LOW,  f.CLOSE, f.VOLUME
-FROM NSEDATA_FACT f
-INNER JOIN METADATA2 m ON f.SYMBOL = m.SYMBOL 
-WHERE m.LISTING_DATE <= CURRENT_DATE - INTERVAL '65 days'
-and DATE >= CURRENT_DATE - INTERVAL '240 days';
-"""
+def fetch_nse_data(start_date=None, end_date=None):
+    if start_date is None:
+        start_date = datetime.today().date() - timedelta(days=240)
+    if end_date is None:
+        end_date = datetime.today().date()
 
-df = pd.read_sql(query, engine)
+    query = """
+        SELECT f.SYMBOL, f.DATE, f.OPEN, f.HIGH, f.LOW, f.CLOSE, f.VOLUME
+        FROM NSEDATA_FACT f
+        INNER JOIN METADATA2 m ON f.SYMBOL = m.SYMBOL 
+        WHERE m.LISTING_DATE <= CURRENT_DATE - INTERVAL '65 days'
+        AND f.DATE BETWEEN %(start_date)s AND %(end_date)s;
+    """
 
-def calculate_rsi(close: pd.Series, window=14):
+    dataframe = pd.read_sql(query, engine, params={"start_date": start_date, "end_date": end_date})
+    return dataframe
+
+
+def rsi_formula(close: pd.Series, window=14):
     delta = close.diff()
     gain = delta.where(delta > 0, 0)
     loss = -delta.where(delta < 0, 0)
@@ -45,7 +57,7 @@ def calculate_rsi(close: pd.Series, window=14):
 
     return rsi
 
-def calculate_adx(df, window=45): #Propritory method
+def calc_adx(df, window=15): #Propritory method
     df = df.copy()
     if df[['high', 'low', 'close']].isnull().any().any():
         return pd.DataFrame()  # Skip broken data
@@ -81,121 +93,94 @@ def calculate_adx(df, window=45): #Propritory method
     return df[['date','symbol', '+DI', '-DI', 'ADX']]
 
 
-def calculate_adx_ta(df, window=14): # Using ADXIndicator from ta library
-    df = df.copy()
-    df = df.sort_values('date')
-    if df[['high', 'low', 'close']].isnull().any().any():
-        return pd.DataFrame()  # Skip broken data
+def calc_ema(df):
+    for span in [10, 20, 45, 60, 90, 120]:
+        df[f'EMA_{span}'] = df.groupby('symbol')['close'].transform(
+            lambda x: x.ewm(span=span, adjust=False).mean()
+        )    
+    return df
 
-    # Step 2: skip small groups
-    if len(df) < window + 1:
-        return pd.DataFrame()
+def calc_rsi(df): 
+    for span in [7, 14]:
+        df[f'RSI_{span}'] = df.groupby('symbol')['close'].transform(
+            lambda x: rsi_formula(x, window=span)
+        )
+    return df
 
-    # Step 3: calculate indicators
-    try:
-        adx = ADXIndicator(high=df['high'], low=df['low'], close=df['close'], window=window)
-        df['+DI'] = adx.adx_pos()
-        df['-DI'] = adx.adx_neg()
-        df['ADX'] = adx.adx()
-        df['symbol'] = df['symbol'].iloc[0]
-        return df[['date', 'symbol', '+DI', '-DI', 'ADX']]
-    except Exception as e:
-        print(f"Failed for a symbol:| Reason: {e}")
-        return pd.DataFrame()
+def calc_z_score(df, span=[20, 45]): #uses SMA
+    for i in span:
+        for j in ['open', 'close']:
+            df[f'{i}d_z_score_{j}'] = df.groupby('symbol')[j].transform(
+                lambda x: (x - x.rolling(i).mean())/x.rolling(i).std()
+            )
+    return df
+
+def calc_di_diff(df):
+    df['di_diff'] = df['+DI'] - df['-DI']
+    df['di_diff_20D_zscore'] = df.groupby('symbol')['di_diff'].transform(
+        lambda x: (x - x.rolling(window=20).mean()) / x.rolling(20).std()
+    )
+    return df
+
+def signals(df):
+    df['Strong_Buy'] = (
+        (df['20D_Z_SCORE_CLOSE'] <= -2.1) | 
+        (
+            (df['di_diff_20D_zscore'] <= -2) & 
+            (df['20D_Z_SCORE_CLOSE'] <= -2)
+        )
+    )
+    df['Strong_Sell'] = (
+        (df['20D_Z_SCORE_OPEN'] >= 2.2) | 
+        (
+            (df['di_diff_20D_zscore'] >= 2) & 
+            (df['20D_Z_SCORE_OPEN'] >=2)
+        )
+    )
+
+    return df
+
+def trade_book(depth = 120): # How long back you want look, 
+    # this will book trades for that period and start recording open positions from next day onwards.  
+    latest_date = df['date'].max()
+    cutoff_date = latest_date - timedelta(days=depth)
+
+    recent_data = df[df['date'] >= cutoff_date]
+    
+    symbols = recent_data['symbol'].unique()
+    trades = []
+    open_positions = []
+
+    for symbol in symbols:
+        symbol_df = recent_data[recent_data['symbol'] == symbol].sort_values('date', ascending = True)
+        for _, row in symbol_df.iterrows():
+            if not open_positions and row ['Strong_Buy'] == 1 and row['date'] < latest_date:
+                trade = {
+                    'symbol' : symbol,
+                    'entry_date' : row['date'],
+                    'entry_price' : row['next_open']
+                }
+                trades.append(trade)
+                open_positions.append(trade)
+            elif open_positions and row ['Strong_Sell'] == 1 and row['date'] < latest_date:
+                trade.update({'exit_price' : row['next_open']})
+                open_positions.pop()
+
+
+        #Function definitions end here ----------------------------------
+df = fetch_nse_data()
+adx_prop = df.groupby('symbol', group_keys=False).apply(lambda g: calc_adx(g, window=15)) #Using proprietory function 
+
+df = df.merge(adx_prop, on=['symbol', 'date'], how='left')
 
 #setting date time format
 df['date'] = pd.to_datetime(df['date'])
-
-
+df['next_open'] = df.groupby('symbol')['open'].shift(-1)
+ 
 
 df = df.sort_values(by=['symbol', 'date'], ascending=[True, True])  # Very important!
 
-
-
-#Calculating EMA, RSI and RSI-EMA
-df['EMA_10'] = df.groupby('symbol')['close'].transform(lambda x: x.ewm(span=10, adjust=False).mean())
-df['EMA_20'] = df.groupby('symbol')['close'].transform(lambda x: x.ewm(span=20, adjust=False).mean())
-df['EMA_45'] = df.groupby('symbol')['close'].transform(lambda x: x.ewm(span=45, adjust=False).mean())
-df['EMA_60'] = df.groupby('symbol')['close'].transform(lambda x: x.ewm(span=60, adjust=False).mean())
-df['EMA_90'] = df.groupby('symbol')['close'].transform(lambda x: x.ewm(span=90, adjust=False).mean())
-df['EMA_120'] = df.groupby('symbol')['close'].transform(lambda x: x.ewm(span=120, adjust=False).mean())
-df['RSI_14'] = df.groupby('symbol')['close'].transform(lambda x: calculate_rsi(x, window=14))
-df['RSI_7']  = df.groupby('symbol')['close'].transform(lambda x: calculate_rsi(x, window=7))
-df['RSI_EMA_14'] = df.groupby('symbol')['RSI_7'].transform(lambda x: x.ewm(span=14, adjust=False).mean())
-
-
-
-# Calculate z-scores directly
-
-
-df['45D_Z_SCORE_CLOSE'] = df.groupby('symbol')['close'].transform(
-    lambda x: (x - x.ewm(span=45, adjust=False).mean()) / x.rolling(45).std()
-)
-
-
-
-df['45D_Z_SCORE_OPEN'] = df.groupby('symbol')['open'].transform(
-    lambda x: (x - x.ewm(span=45, adjust=False).mean()) / x.rolling(45).std()
-) 
-
-# We will be using open/close for 45D score delibrately for better confirmation 
-
-
-# Group by symbol first, then apply the function on the dataframe excluding the symbol
-# adx_ta = df.groupby('symbol', group_keys=False).apply(lambda g: calculate_adx_ta(g, window=45))
-# df = df.merge(adx_ta, on=['symbol', 'date'], how='left') #Using ADXIndicator from ta library
-adx_prop = df.groupby('symbol', group_keys=False).apply(lambda g: calculate_adx(g, window=15)) #Using proprietory function 
-df = df.merge(adx_prop, on=['symbol', 'date'], how='left')
-
-
-#Calculating DI difference for fading momentum
-# Compute di_diff per stock
-df['di_diff'] = df['+DI'] - df['-DI']
-df['di_diff_20D_zscore'] = df.groupby('symbol')['di_diff'].transform(lambda x: (x - x.rolling(window=20).mean()) / x.rolling(20).std())
-
-# df['rolling_quantile_threshold'] = df.groupby('symbol')['di_diff'].transform(
-#     lambda x: x.rolling(window=45).quantile(0.7)
-# )
-
-# df['fading_momentum'] = (
-#     (df['di_diff'] > df['rolling_quantile_threshold']) &
-#     (df['di_diff_slope'] < 0) &
-#     (df['+DI'] > df['-DI'])
-# )
-
-# df['DI_45D_70perc_filter'] = df.groupby('symbol')['+DI'].transform(
-#     lambda x: x.rolling(45).quantile(0.70)
-# )
-# (
-#     df['fading_momentum'] &
-#     ((df['45D_Z_SCORE'] > 2) & (df['RSI_7'] > 67)) &
-#     ((df['+DI']) > (df['DI_45D_70perc_filter'])) |
-    
-
-# )
-#df['Buy_Signal'] = df['45D_Z_SCORE_CLOSE'] <= -1.85
-#df['Sell_Signal'] = df['45D_Z_SCORE_OPEN'] >= 1.85
-df['20D_Z_SCORE_OPEN'] = df.groupby('symbol')['open'].transform(
-    lambda x: (x - x.ewm(span=20, adjust=False).mean()) / x.rolling(20).std()
-)
-df['20D_Z_SCORE_CLOSE'] = df.groupby('symbol')['close'].transform(
-    lambda x: (x - x.rolling(window=20).mean()) / x.rolling(20).std()
-)
-
-df['Strong_Buy'] = ((df['20D_Z_SCORE_CLOSE'] <= -2.1) | ((df['di_diff_20D_zscore'] <= -2) & (df['20D_Z_SCORE_CLOSE'] <= -2)))
-df['Strong_Sell'] = (df['20D_Z_SCORE_OPEN'] >= 2.2) | ((df['di_diff_20D_zscore'] >= 2) & (df['20D_Z_SCORE_OPEN'] >=2))
-
-
-latest_date = df['date'].max()
-cutoff_date = latest_date - timedelta(days=10)
-
-recent_data= df[df['date'] >= cutoff_date]
-
-strong_buy_symbols = recent_data[recent_data['Strong_Buy'] == 1]['symbol'].unique()
-strong_sell_symbols = recent_data[recent_data['Strong_Sell'] == 1]['symbol'].unique()
-# df['Stop_Loss'] = 
-
-
+#Stop loss only works for open positions.
 
 #Resorting the data, for latest dates to be on top
 df = df.sort_values(by=['symbol', 'date'], ascending=[True, False])
