@@ -8,6 +8,6 @@ CREATE TABLE trade_book (
     strategy TEXT,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-	PRIMARY KEY (SYMBOL, entry_date)
+	PRIMARY KEY (symbol, entry_date)
 );
 
