@@ -30,15 +30,18 @@ def main():
     df = utils_obj.fetch_nse_data()
 
     df['date'] = pd.to_datetime(df['date'])
+
     df = df.sort_values(by=['symbol', 'date'], ascending=[True, True])
     
+
     utils_obj.calc_rsi(df)
+
 
     adx_prop = df.groupby('symbol', group_keys=False).apply(lambda g: utils_obj.calc_adx(g, window=15)) #Using proprietory function 
     df = df.merge(adx_prop, on=['symbol', 'date'], how='left')
 
+
     utils_obj.calc_di_diff(df)
-    utils_obj.next_date(df)
     utils_obj.calc_z_score(df)
     strategy(df) 
     trade_book(df, depth =130) 

@@ -31,6 +31,9 @@ def trade_book(df, depth = 130): # How long back you want look,
         WHERE symbol = %s AND status = 'open'
     """
 
+    df['next_open'] = df.groupby('symbol')['open'].shift(-1)
+    df['next_date'] = df.groupby('symbol')['date'].shift(-1) 
+
     latest_date = df['date'].max()
     cutoff_date = latest_date - timedelta(days=depth)
     recent_data = df[df['date'] >= cutoff_date]

@@ -119,12 +119,6 @@ class utils:
             lambda x: (x - x.rolling(window=20).mean()) / x.rolling(20).std()
         )
         return df
-
-    def next_date(self, df):
-        df['next_open'] = df.groupby('symbol')['open'].shift(-1)
-        df['next_date'] = df.groupby('symbol')['date'].shift(-1)    
-
-        return df
     
 
 
