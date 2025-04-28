@@ -8,6 +8,16 @@ import pandas as pd
 from sqlalchemy import create_engine
 import numpy as np
 
+buy_reco = set()
+sell_reco = set()
+strong_buy_reco = set()
+strong_sell_reco = set()
+
+buy_reco_ystd = set()
+sell_reco_ystd = set()
+strong_buy_reco_ystd = set()
+strong_sell_reco_ystd = set()
+
 df = pd.read_sql() # (query, engine)
 df['45D_Z_SCORE_CLOSE'] = df.groupby('symbol')['close'].transform(
     lambda x: (x - x.ewm(span=45, adjust=False).mean()) / x.rolling(45).std()

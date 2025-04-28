@@ -8,6 +8,8 @@ CREATE TABLE trade_book (
     strategy TEXT,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    pl FLOAT GENERATED ALWAYS AS (exit_price - entry_price) STORED,
+    pl_percent FLOAT GENERATED ALWAYS AS ((exit_price - entry_price) / entry_price * 100) STORED,
 	PRIMARY KEY (symbol, entry_date)
 );
 
