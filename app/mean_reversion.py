@@ -32,6 +32,7 @@ def fetch_nse_data(start_date=None, end_date=None):
     if end_date is None:
         end_date = datetime.today().date()
 
+
     query = """
         SELECT f.SYMBOL, f.DATE, f.OPEN, f.HIGH, f.LOW, f.CLOSE, f.VOLUME
         FROM NSEDATA_FACT f
@@ -74,7 +75,8 @@ def calc_adx(df, window=15): #Propritory method
         abs(df['high'] - df['close'].shift(1)),
         abs(df['low'] - df['close'].shift(1))
     ])
-    df['ATR'] = df['true_range'].rolling(window=14, min_periods=1).mean()
+    
+    df['ATR'] = df['TR'].rolling(window=14, min_periods=1).mean()
     # Wilder’s smoothing with EWM
     df['TR_smoothed'] = df['TR'].ewm(alpha=1/window, adjust=False).mean()
     df['+DM_smoothed'] = df['+DM'].ewm(alpha=1/window, adjust=False).mean()
@@ -90,7 +92,7 @@ def calc_adx(df, window=15): #Propritory method
 
     df['ADX'] = df['DX'].ewm(alpha=1/window, adjust=False).mean()
 
-    return df[['date','symbol', '+DI', '-DI', 'ADX']]
+    return df[['date','symbol', '+DI', '-DI', 'ADX', 'ATR']]
 
 
 def calc_ema(df):
@@ -107,11 +109,11 @@ def calc_rsi(df):
         )
     return df
 
-def calc_z_score(df, span=[20, 45]): #uses SMA
+def calc_z_score(df, span=[45, 20]): #uses SMA
     for i in span:
         for j in ['open', 'close']:
             df[f'{i}d_z_score_{j}'] = df.groupby('symbol')[j].transform(
-                lambda x: (x - x.rolling(i).mean())/x.rolling(i).std()
+                lambda x: (x - (x.rolling(i).mean())) / (x.rolling(i).std())
             )
     return df
 
@@ -140,16 +142,17 @@ def signals(df):
 
     return df
 
+def next_date(df):
+    df['next_open'] = df.groupby('symbol')['open'].shift(-1)
+    df['next_date'] = df.groupby('symbol')['date'].shift(-1)    
+
+    return df
     
 def trade_book(df, depth = 130): # How long back you want look, 
     
-    next_day_query = """
-        SELECT DATE FROM CALENDAR WHERE DATE > CURRENT_DATE AND HOLIDAY = FALSE ORDER BY DATE ASC LIMIT 1;    
-    """
-
     entry_insert_query = f"""
         INSERT INTO TRADE_BOOK (symbol, entry_date, entry_price, status, strategy, created_at, updated_at)
-        VALUES %s
+        VALUES (%s, %s, %s, %s, %s, %s, %s)
         ON CONFLICT (symbol, entry_date)
         DO NOTHING
     """
@@ -158,29 +161,31 @@ def trade_book(df, depth = 130): # How long back you want look,
         SET exit_date = %s, exit_price = %s, updated_at = %s, status = 'closed'
         WHERE symbol = %s AND status = 'open'
     """
+    stop_loss_exit_query = f"""
+        UPDATE TRADE_BOOK
+        SET exit_date = %s, exit_price = %s, updated_at = %s, status = 'closed', stp_lss_trggrd = True
+        WHERE symbol = %s AND status = 'open'
+    """
 
     latest_date = df['date'].max()
     cutoff_date = latest_date - timedelta(days=depth)
     recent_data = df[df['date'] >= cutoff_date]
-    
-    symbols = recent_data['symbol'].unique()
 
-    next_day = pd.read_sql(next_day_query, engine).iloc[0,0]
-    df['next_open'] = df.groupby('symbol')['open'].shift(-1)
+    symbols = recent_data['symbol'].unique()
 
     conn = psycopg2.connect(SQL_POSTGRES_CONN)
     cursor = conn.cursor()
 
     for symbol in symbols:
         symbol_df = recent_data[recent_data['symbol'] == symbol].sort_values('date', ascending = True)
-        open_positions = []
+        open_positions = None
         for _, row in symbol_df.iterrows():
             
-            if not open_positions and row ['Strong_Buy'] == 1 and row['date'] < latest_date:
-                now_timestamp = datetime.now().timestamp()
+            if open_positions is None and row ['Strong_Buy'] == 1 and row['date'] < latest_date:
+                now_timestamp = datetime.now()
                 
                 entry_trade_data = [row['symbol'],
-                              next_day, 
+                              row['next_date'], 
                               row['next_open'], 
                               'open', 
                               'Mean Reversion', 
@@ -188,26 +193,35 @@ def trade_book(df, depth = 130): # How long back you want look,
                               now_timestamp ]
                 
                 cursor.execute(entry_insert_query, tuple(entry_trade_data))
-                open_positions.append(next_day)
+                open_positions = (row['next_open'])
 
                     
-            elif open_positions and row ['Strong_Sell'] == 1 and row['date'] < latest_date:
-                now_timestamp = datetime.now().timestamp()
+            elif open_positions is not None and row ['Strong_Sell'] == 1 and row['date'] < latest_date:
+                now_timestamp = datetime.now()
 
-                exit_trade_data = [next_day,
+                exit_trade_data = [row['next_date'],
                               row['next_open'],
                               now_timestamp,
                               row['symbol']]
                 
                 cursor.execute(exit_insert_query, tuple(exit_trade_data))
-                open_positions = False
+                open_positions = None
 
-            elif open_positions and (
-                row['z'] ==1 and row['close'] <= 0.98*recent_data[recent_data['date'] == next_day]['close']
-                |
-                row['close'] <= 0.975*recent_data[recent_data['date']==next_day]['close']
+            elif open_positions is not None and row['date'] < latest_date and (
+                                
+                (row['close'] <= (open_positions - (1.5*row['ATR'])))
+                or
+                (row['20d_z_score_close'] <= -1.9 and row['di_diff_20D_zscore'] <= -1.9 and row['close'] <= 0.98*open_positions)
             ):
-                stop_loss_exit = []
+                now_timestamp = datetime.now()
+                stop_loss_exit_data = [row['next_date'],
+                                  row['next_open'],
+                                  now_timestamp,
+                                  row['symbol'],
+                                  ]
+                cursor.execute(stop_loss_exit_query, tuple(stop_loss_exit_data))
+                open_positions = None
+
     conn.commit()
     cursor.close()
     conn.close()
@@ -215,29 +229,39 @@ def trade_book(df, depth = 130): # How long back you want look,
     return df
 
         #Function definitions end here ----------------------------------
-df = fetch_nse_data()
-adx_prop = df.groupby('symbol', group_keys=False).apply(lambda g: calc_adx(g, window=15)) #Using proprietory function 
-
-df = df.merge(adx_prop, on=['symbol', 'date'], how='left')
-
-#setting date time format
-df['date'] = pd.to_datetime(df['date'])
-df['next_open'] = df.groupby('symbol')['open'].shift(-1)
 
 
+def main():
+
+    df = fetch_nse_data()
+
+    df['date'] = pd.to_datetime(df['date'])
+
+    df = df.sort_values(by=['symbol', 'date'], ascending=[True, True])
+
+    adx_prop = df.groupby('symbol', group_keys=False).apply(lambda g: calc_adx(g, window=15)) #Using proprietory function 
+    df = df.merge(adx_prop, on=['symbol', 'date'], how='left')
+
+    calc_rsi(df)
+    calc_di_diff(df)
+    calc_z_score(df)
+    signals(df)
+    next_date(df)
+    trade_book(df)
+
+    df = df.sort_values(by=['symbol', 'date'], ascending=[True, False])
+
+    # print(df[df["symbol"] == "3IINFOLTD"].tail(20))
+    df_first_row=df.groupby('symbol').head(1)
+    # print(df_first_row)
+
+
+
+if __name__ == "__main__":
+    main()
  
 
-df = df.sort_values(by=['symbol', 'date'], ascending=[True, True])  # Very important!
 
-#Stop loss only works for open positions.
-
-#Resorting the data, for latest dates to be on top
-df = df.sort_values(by=['symbol', 'date'], ascending=[True, False])
-print(df[df["symbol"] == "AFIL"].head(15))
-df_first_row=df.groupby('symbol').head(1)
-# print(df_first_row)
-# print(f'BUY - {strong_buy_symbols}') 
-# print(f'SELL - {strong_sell_symbols}')
 
 
 # buy_reco.update(df_first_row[df_first_row['Buy_Signal'] == True]['symbol'])
