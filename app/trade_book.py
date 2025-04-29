@@ -12,8 +12,15 @@ from datetime import datetime, timedelta
 
 
 
-def trade_book(df, depth = 130): # How long back you want look, 
+def trade_book(df, depth = None): # How long back you want look, 
     
+    latest_date = df['date'].max()
+    if depth is not None:
+        cutoff_date = latest_date - timedelta(days=depth)
+        recent_data = df[df['date'] >= cutoff_date]
+    else:
+        recent_data = df
+
     entry_insert_query = f"""
         INSERT INTO TRADE_BOOK (symbol, entry_date, entry_price, status, strategy, created_at, updated_at)
         VALUES (%s, %s, %s, %s, %s, %s, %s)
@@ -33,10 +40,6 @@ def trade_book(df, depth = 130): # How long back you want look,
 
     df['next_open'] = df.groupby('symbol')['open'].shift(-1)
     df['next_date'] = df.groupby('symbol')['date'].shift(-1) 
-
-    latest_date = df['date'].max()
-    cutoff_date = latest_date - timedelta(days=depth)
-    recent_data = df[df['date'] >= cutoff_date]
 
     symbols = recent_data['symbol'].unique()
 
@@ -78,7 +81,7 @@ def trade_book(df, depth = 130): # How long back you want look,
                                 
                 (row['close'] <= (open_positions - (1.5*row['ATR'])))
                 or
-                (row['20d_z_score_close'] <= -1.9 and row['di_diff_20D_zscore'] <= -1.9 and row['close'] <= 0.98*open_positions)
+                (row['20d_z_score_close'] <= -2.1 and row['di_diff_20D_zscore'] <= -2 and row['close'] <= 0.98*open_positions)
             ):
                 now_timestamp = datetime.now()
                 stop_loss_exit_data = [row['next_date'],

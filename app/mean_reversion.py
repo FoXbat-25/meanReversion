@@ -25,7 +25,7 @@ def strategy(df):
 
 def main():
 
-    utils_obj = utils()
+    utils_obj = utils(start_date='2023-08-01')
 
     df = utils_obj.fetch_nse_data()
 
@@ -33,10 +33,6 @@ def main():
 
     df = df.sort_values(by=['symbol', 'date'], ascending=[True, True])
     
-
-    utils_obj.calc_rsi(df)
-
-
     adx_prop = df.groupby('symbol', group_keys=False).apply(lambda g: utils_obj.calc_adx(g, window=15)) #Using proprietory function 
     df = df.merge(adx_prop, on=['symbol', 'date'], how='left')
 
@@ -44,13 +40,13 @@ def main():
     utils_obj.calc_di_diff(df)
     utils_obj.calc_z_score(df)
     strategy(df) 
-    trade_book(df, depth =130) 
+    trade_book(df, 7) 
 
-    # df = df.sort_values(by=['symbol', 'date'], ascending=[True, False])
+    df = df.sort_values(by=['symbol', 'date'], ascending=[True, False])
     
     # print(df[df["symbol"] == "3IINFOLTD"].tail(20))
-    # df_first_row=df.groupby('symbol').head(1)
-    # print(df_first_row)
+    df_first_row=df.groupby('symbol').head(1)
+    print(df_first_row[df_first_row['Strong_Buy']==1])
 
 if __name__ == "__main__":
     main()
