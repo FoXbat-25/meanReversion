@@ -1,20 +1,20 @@
 import sys
 sys.path.append('/home/sierra1/projects/meanReversion')
 
-from config import SQL_POSTGRES_CONN
+from config import SQL_POSTGRES_CONN, SQL_ALCHEMY_CONN
 
 import psycopg2
 import pandas as pd 
 import numpy as np
 from datetime import datetime, timedelta
 
-
-
-
-
 def trade_book(df, depth = None): # How long back you want look, 
     
+    conn = psycopg2.connect(SQL_POSTGRES_CONN)
+    cursor = conn.cursor()
+
     latest_date = df['date'].max()
+    
     if depth is not None:
         cutoff_date = latest_date - timedelta(days=depth)
         recent_data = df[df['date'] >= cutoff_date]
@@ -34,26 +34,38 @@ def trade_book(df, depth = None): # How long back you want look,
     """
     stop_loss_exit_query = f"""
         UPDATE TRADE_BOOK
-        SET exit_date = %s, exit_price = %s, updated_at = %s, status = 'closed', stp_lss_trggrd = True
+        SET exit_date = %s, exit_price = %s, updated_at = %s, status = 'closed', stp_lss_trggrd = True, cooldown_end_date = %s
         WHERE symbol = %s AND status = 'open'
     """
 
-    df['next_open'] = df.groupby('symbol')['open'].shift(-1)
-    df['next_date'] = df.groupby('symbol')['date'].shift(-1) 
+    cooldown_fetch_query = """
+        SELECT date, cooldown_end_date
+        FROM CALENDAR c
+        WHERE holiday = False
+        ORDER BY date ASC;
+    """
+    cursor.execute(cooldown_fetch_query)
+    cooldown_results = cursor.fetchall()
+
+    # Create a symbol-to-date mapping
+    cooldown_dict = {symbol: cooldown_date for symbol, cooldown_date in cooldown_results}
 
     symbols = recent_data['symbol'].unique()
-
-    conn = psycopg2.connect(SQL_POSTGRES_CONN)
-    cursor = conn.cursor()
+ 
 
     for symbol in symbols:
         symbol_df = recent_data[recent_data['symbol'] == symbol].sort_values('date', ascending = True)
         open_positions = None
+        entry_atr = None
         for _, row in symbol_df.iterrows():
             
             if open_positions is None and row ['Strong_Buy'] == 1 and row['date'] < latest_date:
                 now_timestamp = datetime.now()
                 
+                cooldown_date = cooldown_dict.get(row['date'])
+                if cooldown_date and row['next_date'] < cooldown_date:
+                    continue
+
                 entry_trade_data = [row['symbol'],
                             row['next_date'], 
                             row['next_open'], 
@@ -64,6 +76,7 @@ def trade_book(df, depth = None): # How long back you want look,
                 
                 cursor.execute(entry_insert_query, tuple(entry_trade_data))
                 open_positions = (row['next_open'])
+                entry_atr = (row['ATR'])
 
                     
             elif open_positions is not None and row ['Strong_Sell'] == 1 and row['date'] < latest_date:
@@ -76,13 +89,14 @@ def trade_book(df, depth = None): # How long back you want look,
                 
                 cursor.execute(exit_insert_query, tuple(exit_trade_data))
                 open_positions = None
+                entry_atr = None
 
             elif open_positions is not None and row['date'] < latest_date and (
                                 
-                (row['close'] <= (open_positions - (1.5*row['ATR'])))
-                or
-                (row['20d_z_score_close'] <= -2.1 and row['di_diff_20D_zscore'] <= -2 and row['close'] <= 0.98*open_positions)
-            ):
+                (row['close'] <= (open_positions - (1.5*entry_atr)))
+    
+                ):
+
                 now_timestamp = datetime.now()
                 stop_loss_exit_data = [row['next_date'],
                                 row['next_open'],
@@ -91,6 +105,7 @@ def trade_book(df, depth = None): # How long back you want look,
                                 ]
                 cursor.execute(stop_loss_exit_query, tuple(stop_loss_exit_data))
                 open_positions = None
+                entry_atr = None
 
     conn.commit()
     cursor.close()

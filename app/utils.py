@@ -1,6 +1,6 @@
 import sys
 sys.path.append('/home/sierra1/projects/meanReversion')
-from config import SQL_ALCHEMY_CONN, SQL_POSTGRES_CONN
+from config import SQL_ALCHEMY_CONN
 
 import psycopg2
 
@@ -37,8 +37,34 @@ class utils:
         """
 
         self.dataframe = pd.read_sql(query, engine, params={"start_date": self.start_date, "end_date": self.end_date})
+
+        self.dataframe['date'] = pd.to_datetime(self.dataframe['date'])
+        self.dataframe = self.dataframe.sort_values(by=['symbol', 'date'], ascending=[True, True])
+
+        self.dataframe['next_open'] = self.dataframe.groupby('symbol')['open'].shift(-1)
+        self.dataframe['next_date'] = self.dataframe.groupby('symbol')['date'].shift(-1)
+        self.dataframe['prev_date'] = self.dataframe.groupby('symbol')['date'].shift(1)
+
         return self.dataframe
 
+    def fetch_cooldown_end_date(self, df):
+
+        query="""
+            SELECT date, cooldown_end_date
+            FROM CALENDAR c
+            WHERE holiday = False
+            ORDER BY date ASC;
+        """
+
+        calendar_df = pd.read_sql(query, engine)
+        calendar_df['date'] = pd.to_datetime(calendar_df['date'])
+
+        calendar_df = calendar_df.rename(columns={'date': 'next_date'})
+        
+        df['date'] = pd.to_datetime(df['date'])
+        df = df.merge(calendar_df, on='next_date', how='left')
+
+        return df
 
     def rsi_formula(self, close: pd.Series, window=14):
 
@@ -54,7 +80,7 @@ class utils:
 
         return rsi
 
-    def calc_adx(self, df, window=15): #Propritory method
+    def adx_formula(self, df, window=15): #Propritory method
         df = df.copy()
         if df[['high', 'low', 'close']].isnull().any().any():
             return pd.DataFrame()  # Skip broken data
@@ -90,6 +116,12 @@ class utils:
 
         return df[['date','symbol', '+DI', '-DI', 'ADX', 'ATR']]
 
+    def calc_adx(self, df, window = 15):
+
+        adx_prop = df.groupby('symbol', group_keys=False).apply(lambda g: self.adx_formula(g, window=window)) #Using proprietory function 
+        df = df.merge(adx_prop, on=['symbol', 'date'], how='left')
+    
+        return df
 
     def calc_ema(self, df):
         for span in [10, 20, 45, 60, 90, 120]:
@@ -120,6 +152,8 @@ class utils:
         )
         return df
     
-
-
+    def volume_check(self, df):
+        df['volume_20d_SMA'] = df['volume'].rolling(window=20).mean()
+        df['volume_flag'] = df['volume_20d_SMA'] > 500000 # or ₹10 crore for traded value
+        return df
         
