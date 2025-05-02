@@ -1,0 +1,7 @@
+psycopg2-binary
+python-decouple
+pandas
+SQLAlchemy
+ta
+flask
+matplotlib
