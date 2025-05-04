@@ -34,7 +34,7 @@ def main(adx_window=15, z_score_window_list=[20], min_volume=500000, vol_window 
 
     utils_obj = utils()
 
-    df = utils_obj.fetch_nse_data()
+    df = utils_obj.dataframe
     df = utils_obj.calc_adx(df, window=adx_window)   
     df = utils_obj.calc_z_score(df, span=z_score_window_list) # span accepts only list
     df = utils_obj.volume_check(df, min_volume=min_volume, rolling_window=vol_window)
