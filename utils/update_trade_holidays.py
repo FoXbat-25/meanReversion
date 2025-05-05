@@ -9,13 +9,18 @@ import psycopg2
 
 csv_file = '../data/NSE trading holidays 2023.csv'
 def trade_date(): #This is the next day after a signal has been provided.
-        calendar_df = pd.read_csv(csv_file, parse_dates=['date'], dayfirst=False)
-        calendar_df['remarks'] = calendar_df['remarks'].fillna('')
+        calendar_df = pd.read_csv(csv_file, parse_dates=['date'], dayfirst=True)
         calendar_df['holiday'] = True
+        calendar_df['remarks'] = calendar_df['remarks'].fillna('').str.lower()
+        calendar_df.loc[
+            calendar_df['remarks'].str.contains(r'diwali.*laxmi', regex=True),
+            'holiday'
+        ] = False
+        
         data = list(calendar_df[['date', 'day', 'remarks', 'holiday']].itertuples(index=False, name=None))
         # print(data)
         update_query = """
-        UPDATE CALENDAR_COPY
+        UPDATE CALENDAR
         SET
             remarks = %s,
             holiday = %s

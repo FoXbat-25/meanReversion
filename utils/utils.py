@@ -50,19 +50,18 @@ class utils:
     def fetch_cooldown_end_date(self, df):
 
         query="""
-            SELECT date, cooldown_end_date
+            SELECT date, cooldown_end_date, holiday
             FROM CALENDAR c
-            WHERE holiday = False
             ORDER BY date ASC;
         """
-
         calendar_df = pd.read_sql(query, engine)
-        calendar_df['date'] = pd.to_datetime(calendar_df['date'])
+        calendar_df['date'] = pd.to_datetime(calendar_df['date'])      
 
         calendar_df = calendar_df.rename(columns={'date': 'next_date'})
-
-        df['date'] = pd.to_datetime(df['date'])
+        
         df = df.merge(calendar_df, on='next_date', how='left')
+        df['cooldown_end_date'] = pd.to_datetime(df['cooldown_end_date'])
+        
 
         return df
 
