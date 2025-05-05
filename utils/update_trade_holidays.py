@@ -1,22 +1,21 @@
 import sys
 sys.path.append('/home/sierra1/projects/meanReversion')
-from config import SQL_POSTGRES_CONN
+from app.config import SQL_POSTGRES_CONN
 
 import pandas as pd
 import psycopg2
 
 #Will have to manually get holiday list for each year and feed into the function.
 
-csv_file = 'NSE trading holidays.csv'
+csv_file = '../data/NSE trading holidays 2023.csv'
 def trade_date(): #This is the next day after a signal has been provided.
-        calendar_df = pd.read_csv(csv_file, parse_dates=['date'], dayfirst=True)
+        calendar_df = pd.read_csv(csv_file, parse_dates=['date'], dayfirst=False)
         calendar_df['remarks'] = calendar_df['remarks'].fillna('')
-        calendar_df['holiday'] = True  # Set as boolean
-        # print(calendar_df)
+        calendar_df['holiday'] = True
         data = list(calendar_df[['date', 'day', 'remarks', 'holiday']].itertuples(index=False, name=None))
         # print(data)
         update_query = """
-        UPDATE CALENDAR
+        UPDATE CALENDAR_COPY
         SET
             remarks = %s,
             holiday = %s
