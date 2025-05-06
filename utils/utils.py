@@ -79,10 +79,9 @@ class utils:
 
         return rsi
 
-    def adx_formula(self, df, window=15): #Propritory method
+    def adx_formula(self, df, adx_window=15, atr_window=14): #Propritory method
         df = df.copy()
-        if df[['high', 'low', 'close']].isnull().any().any():
-            return pd.DataFrame()  # Skip broken data
+        # df = df.dropna(subset=['high', 'low', 'close']) # Skip broken data
 
         # Step 2: skip small groups
         df['up_move'] = df['high'].diff()
@@ -97,11 +96,11 @@ class utils:
             abs(df['low'] - df['close'].shift(1))
         ])
         
-        df['ATR'] = df['TR'].rolling(window=14, min_periods=1).mean()
+        df['ATR'] = df['TR'].rolling(window=atr_window, min_periods=1).mean()
         # Wilder’s smoothing with EWM
-        df['TR_smoothed'] = df['TR'].ewm(alpha=1/window, adjust=False).mean()
-        df['+DM_smoothed'] = df['+DM'].ewm(alpha=1/window, adjust=False).mean()
-        df['-DM_smoothed'] = df['-DM'].ewm(alpha=1/window, adjust=False).mean()
+        df['TR_smoothed'] = df['TR'].ewm(alpha=1/adx_window, adjust=False).mean()
+        df['+DM_smoothed'] = df['+DM'].ewm(alpha=1/adx_window, adjust=False).mean()
+        df['-DM_smoothed'] = df['-DM'].ewm(alpha=1/adx_window, adjust=False).mean()
 
         df['+DI'] = 100 * df['+DM_smoothed'] / df['TR_smoothed']
         df['-DI'] = 100 * df['-DM_smoothed'] / df['TR_smoothed']
@@ -111,13 +110,13 @@ class utils:
                             100 * abs(df['+DI'] - df['-DI']) / df['DI_sum'],
                             0)
 
-        df['ADX'] = df['DX'].ewm(alpha=1/window, adjust=False).mean()
+        df['ADX'] = df['DX'].ewm(alpha=1/adx_window, adjust=False).mean()
 
         return df[['date','symbol', '+DI', '-DI', 'ADX', 'ATR']]
 
-    def calc_adx(self, df, window = 15):
+    def calc_adx(self, df, adx_window = 15, atr_window=14):
 
-        adx_prop = df.groupby('symbol', group_keys=False).apply(lambda g: self.adx_formula(g, window=window)) #Using proprietory function 
+        adx_prop = df.groupby('symbol', group_keys=False).apply(lambda g: self.adx_formula(g, adx_window=adx_window, atr_window=atr_window)) #Using proprietory function 
         df = df.merge(adx_prop, on=['symbol', 'date'], how='left')
     
         return df
