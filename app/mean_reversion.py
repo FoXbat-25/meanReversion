@@ -1,5 +1,7 @@
 import sys
-sys.path.append('/home/sierra1/projects/meanReversion')
+import os
+mean_reversion_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '../../meanReversion'))
+sys.path.append(mean_reversion_path)
 
 from utils.utils import utils
 
@@ -42,7 +44,7 @@ def mean_reversion(start_from='2023-01-01', adx_window=15,atr_window=14, z_score
     df = utils_obj.volume_check(df, min_volume=min_volume, rolling_window=vol_window)
     df = utils_obj.calc_di_diff(df,rolling_window=di_diff_window)
     
-    df = strategy(df)  
+    df = strategy(df) 
 
     # df = df.sort_values(by=['symbol', 'date'], ascending=[True, False])
 
