@@ -1,5 +1,7 @@
 import sys
-sys.path.append('/home/sierra1/projects/meanReversion/')
+import os
+mean_reversion_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '../../meanReversion'))
+sys.path.append(mean_reversion_path)
 from app.config import SQL_ALCHEMY_CONN
 
 import psycopg2

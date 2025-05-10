@@ -3,9 +3,7 @@ import os
 mean_reversion_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '../../meanReversion'))
 sys.path.append(mean_reversion_path)
 
-from utils.utils import utils
-
-from datetime import datetime, timedelta
+from meanReversion.utils import utils
 
 import numpy as np
 import pandas as pd
