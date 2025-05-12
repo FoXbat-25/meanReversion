@@ -22,9 +22,10 @@ engine = create_engine(SQL_ALCHEMY_CONN)
 
 class utils:
 
-    def __init__(self, start_date=None, end_date = None):
-        self.start_date = start_date if start_date else datetime.today().date() - timedelta(days=90)
+    def __init__(self, start_date=None, end_date = None, lookback_skip = 45):
+        self.start_date = start_date if start_date else datetime.today().date() - timedelta(days=90) # Includes warm up days
         self.end_date = end_date if end_date else datetime.today().date()
+        self.lookback_skip = lookback_skip
         self.fetch_nse_data()
         
 
@@ -38,11 +39,11 @@ class utils:
             AND f.DATE BETWEEN %(start_date)s AND %(end_date)s;
         """
 
-        self.dataframe = pd.read_sql(query, engine, params={"start_date": self.start_date, "end_date": self.end_date})
+        self.start_date_with_lookback_skip = pd.to_datetime(self.start_date) - timedelta(self.lookback_skip)
+        self.dataframe = pd.read_sql(query, engine, params={"start_date": self.start_date_with_lookback_skip, "end_date": self.end_date})
 
         self.dataframe['date'] = pd.to_datetime(self.dataframe['date'])
         self.dataframe = self.dataframe.sort_values(by=['symbol', 'date'], ascending=[True, True])
-
         self.dataframe['next_open'] = self.dataframe.groupby('symbol')['open'].shift(-1)
         self.dataframe['next_date'] = self.dataframe.groupby('symbol')['date'].shift(-1)
         self.dataframe['prev_date'] = self.dataframe.groupby('symbol')['date'].shift(1)

@@ -1,9 +1,9 @@
 import sys
 import os
-mean_reversion_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '../../meanReversion'))
+mean_reversion_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '../../'))
 sys.path.append(mean_reversion_path)
 
-from meanReversion.utils import utils
+from meanReversion.utils.utils import utils
 
 import numpy as np
 import pandas as pd
@@ -33,7 +33,7 @@ def strategy(df):
 def mean_reversion(start_from='2023-01-01', adx_window=15,atr_window=14, z_score_window_list=[20], min_volume=500000, vol_window = 20, di_diff_window=20):
 
     utils_obj = utils(start_date=start_from)
-
+    
     df = utils_obj.dataframe
     df = utils_obj.calc_adx(df, adx_window=adx_window,atr_window=atr_window)
     df = utils_obj.fetch_cooldown_end_date(df)
@@ -42,7 +42,9 @@ def mean_reversion(start_from='2023-01-01', adx_window=15,atr_window=14, z_score
     df = utils_obj.volume_check(df, min_volume=min_volume, rolling_window=vol_window)
     df = utils_obj.calc_di_diff(df,rolling_window=di_diff_window)
     
-    df = strategy(df) 
+    df = strategy(df)
+    df = df[df['date'] >= start_from] 
+    # print(df)
 
     # df = df.sort_values(by=['symbol', 'date'], ascending=[True, False])
 
